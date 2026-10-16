@@ -1,0 +1,20 @@
+# Secrets - never commit
+config.json
+*.secret
+*.secret.*
+
+# Cached API tokens and downloaded scoresheet PDFs
+cache/
+
+# Generated reports (contain player names)
+output/
+
+# Build artifacts
+/gamesheet-stats
+/bin/
+*.test
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
