@@ -151,6 +151,11 @@ func run(configPath, outDir, cacheDir string, refresh, listTeams bool, teamFlag 
 			fmt.Fprintf(os.Stderr, "warning: game %s: parsing scoresheet: %v (skipped)\n", g.ID, err)
 			continue
 		}
+		if sheet.GameType == "" {
+			if info, err := client.ScheduleGame(g.ID); err == nil {
+				sheet.GameType = scoresheet.NormalizeAPIGameType(info.GameType)
+			}
+		}
 		gs, err := stats.Build(g, sheet)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: game %s: %v (skipped)\n", g.ID, err)

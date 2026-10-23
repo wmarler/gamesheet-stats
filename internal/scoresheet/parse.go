@@ -21,11 +21,12 @@ const (
 )
 
 var (
-	reInt     = regexp.MustCompile(`^\d+$`)
-	reFloat   = regexp.MustCompile(`^\d+(\.\d+)?$`)
-	reTime    = regexp.MustCompile(`^\d{1,3}:\d{2}$`)
-	rePeriod  = regexp.MustCompile(`^(\d+(st|nd|rd|th)|OT\d*|SO)$`)
-	reGoalPer = regexp.MustCompile(`^(\d+|OT\d*|SO)$`)
+	reInt         = regexp.MustCompile(`^\d+$`)
+	reFloat       = regexp.MustCompile(`^\d+(\.\d+)?$`)
+	reTime        = regexp.MustCompile(`^\d{1,3}:\d{2}$`)
+	rePeriod      = regexp.MustCompile(`^(\d+(st|nd|rd|th)|OT\d*|SO)$`)
+	reGoalPer     = regexp.MustCompile(`^(\d+|OT\d*|SO)$`)
+	rePenaltyCode = regexp.MustCompile(`^[A-Z]{2,6}(-[A-Z0-9]{1,4})+$`)
 )
 
 // Parse parses a scoresheet PDF.
@@ -43,6 +44,7 @@ func Parse(data []byte) (*Scoresheet, error) {
 	if sheet.Home.Name == "" && sheet.Visitor.Name == "" {
 		return nil, fmt.Errorf("could not find team names; is this a GameSheet scoresheet?")
 	}
+	sheet.GameType = gameType(data)
 	return sheet, nil
 }
 
@@ -170,6 +172,8 @@ func parseSide(t *TeamSheet, runs []run) {
 		shotsHeaderY = -1.0 // "1 2 3 TOTAL" header row of the SHOTS table
 		shotsBotY    = -1.0 // "Referee" row (end of SHOTS table)
 		scoreAnchors []float64
+		penAnchors   []float64
+		penHeaderY   = -1.0
 		shotAnchors  []float64
 		shotLabels   []string
 		goalieX      = -1.0
@@ -214,6 +218,20 @@ func parseSide(t *TeamSheet, runs []run) {
 			}
 			if strings.Join(labels, " ") == "PER TIME G A A" {
 				scoreAnchors = xs
+			}
+		}
+		// Penalty header: PER NO. MIN. Code Infraction OFF START ON.
+		if penAnchors == nil {
+			var xs []float64
+			var labels []string
+			for _, rn := range row {
+				if rn.X > rosterNameMaxX-10 && rn.X < penaltyMaxX {
+					xs = append(xs, rn.X)
+					labels = append(labels, rn.S)
+				}
+			}
+			if strings.Contains(strings.Join(labels, " "), "Code Infraction") && len(xs) >= 4 {
+				penAnchors, penHeaderY = xs, y
 			}
 		}
 		// Shots header: 1 2 3 [OT] TOTAL in the shots band.
@@ -314,6 +332,51 @@ func parseSide(t *TeamSheet, runs []run) {
 				}
 				if ok || g.Scorer != "" {
 					t.Scores = append(t.Scores, g)
+				}
+			}
+		}
+		if penAnchors != nil && rosterBotY >= 0 {
+			var penRuns []run
+			for _, rn := range runs {
+				if rn.Y < penHeaderY-1 && rn.Y > rosterBotY+1 && rn.X > rosterNameMaxX-10 && rn.X < penaltyMaxX {
+					penRuns = append(penRuns, rn)
+				}
+			}
+			for _, row := range groupRows(penRuns, 1.0) {
+				p := Penalty{}
+				for _, rn := range row {
+					idx := nearest(penAnchors, rn.X, 14)
+					if idx < 0 || idx >= len(penAnchors) {
+						continue
+					}
+					// Anchors are PER, NO., MIN., Code, OFF, START, ON, but a
+					// scoresheet occasionally drops a column, so match on the
+					// header text we stored alongside... we only kept X. The
+					// header order is stable: 0 period, 1 player, 2 minutes,
+					// 3 code, and the last three are off/start/on times.
+					switch {
+					case idx == 0 && reGoalPer.MatchString(rn.S):
+						p.Period = rn.S
+					case idx == 1 && reInt.MatchString(rn.S):
+						p.Number = rn.S
+					case idx == 2 && reFloat.MatchString(rn.S):
+						p.Minutes, _ = strconv.ParseFloat(rn.S, 64)
+						p.HasMinutes = true
+					case idx == 3 && rePenaltyCode.MatchString(rn.S):
+						p.Code = rn.S
+					case idx >= len(penAnchors)-3 && reTime.MatchString(rn.S):
+						switch idx - (len(penAnchors) - 3) {
+						case 0:
+							// OFF time: when the whistle blew. Not needed.
+						case 1:
+							p.Start = rn.S
+						case 2:
+							p.On = rn.S
+						}
+					}
+				}
+				if p.Code != "" {
+					t.Penalties = append(t.Penalties, p)
 				}
 			}
 		}

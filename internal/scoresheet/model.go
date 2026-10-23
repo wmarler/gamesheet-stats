@@ -17,6 +17,11 @@ type Scoresheet struct {
 	Location   string
 	Status     string // e.g. "FINAL"
 
+	// GameType is the checked box in the scoresheet "GAME TYPE" panel:
+	// "League", "Tournament", "Exhibition", or "Playoff". Empty if no single
+	// box is checked.
+	GameType string
+
 	// Periods as printed in the "Length of Game" box, e.g. {"1st",12},{"2nd",12},{"3rd",12}.
 	Periods []Period
 
@@ -32,10 +37,11 @@ type Period struct {
 
 // TeamSheet is one half (HOME or VISITOR) of the scoresheet.
 type TeamSheet struct {
-	Name   string
-	Goals  int // "Total Goals" box
-	Roster []Player
-	Scores []Goal
+	Name      string
+	Goals     int // "Total Goals" box
+	Roster    []Player
+	Scores    []Goal
+	Penalties []Penalty
 
 	// ShotColumns are the period column labels of the SHOTS table, e.g. "1","2","3" (and "OT" if present).
 	ShotColumns []string
@@ -63,6 +69,17 @@ type Goal struct {
 	Time    string
 	Scorer  string   // jersey number
 	Assists []string // jersey numbers (0-2)
+}
+
+// Penalty is one row of the penalties table.
+type Penalty struct {
+	Period     string
+	Number     string  // jersey; empty for a bench penalty with no player
+	Minutes    float64 // duration as printed (running-time games use 1 or 1.5 for a minor)
+	HasMinutes bool
+	Code       string // e.g. "TR-MIN"
+	Start      string // clock time remaining when the penalty started, e.g. "10:32"
+	On         string // clock time remaining when the player returned
 }
 
 // GoalieLine is one row of the SHOTS table.

@@ -96,6 +96,86 @@ func TestBuild(t *testing.T) {
 	if len(gs.Warnings) != 0 {
 		t.Errorf("unexpected warnings: %v", gs.Warnings)
 	}
+	if gs.Goals[0].Situation != "EV" {
+		t.Errorf("situation = %q", gs.Goals[0].Situation)
+	}
+	// Period 2 was split between both goalies, so neither goals-against is known.
+	if gs.Goalies[0].GoalsAgainstKnown || gs.Goalies[1].GoalsAgainstKnown {
+		t.Errorf("goalie GA should be unknown: %+v", gs.Goalies)
+	}
+	if !gs.EmptyNetKnown || gs.EmptyNetAgainst != 0 || gs.Ended != "" {
+		t.Errorf("ended=%q en=%d known=%v", gs.Ended, gs.EmptyNetAgainst, gs.EmptyNetKnown)
+	}
+}
+
+func TestLoneGoalieGetsEveryGoalAgainst(t *testing.T) {
+	sheet := sampleSheet()
+	sheet.Visitor.Goalies = []scoresheet.GoalieLine{
+		{Number: "31", Shots: []int{2, 5, 2}, HasShots: true, Total: 9, Minutes: 36},
+	}
+	gs, err := Build(sampleGame(), sheet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gs.Goalies[0].GoalsAgainstKnown || gs.Goalies[0].GoalsAgainst != 2 {
+		t.Errorf("goalie = %+v", gs.Goalies[0])
+	}
+}
+
+func TestPowerPlayAndPenaltyLog(t *testing.T) {
+	sheet := sampleSheet()
+	// Opponent penalty covers 10:00 down to 08:00 of period 3; our goal is at 09:11.
+	sheet.Home.Penalties = []scoresheet.Penalty{{
+		Period: "3", Number: "8", Minutes: 1.5, HasMinutes: true,
+		Code: "HK-MIN", Start: "10:00", On: "08:00",
+	}}
+	sheet.Visitor.Penalties = []scoresheet.Penalty{{
+		Period: "1", Number: "19", Minutes: 2, HasMinutes: true,
+		Code: "LB-MIN", Start: "05:00", On: "03:00",
+	}}
+	gs, err := Build(sampleGame(), sheet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gs.Goals[0].Situation != "PP" {
+		t.Errorf("situation = %q, want PP", gs.Goals[0].Situation)
+	}
+	if len(gs.Penalties) != 1 || gs.Penalties[0].Type != "Other" || gs.Penalties[0].Minutes != "2" || gs.Penalties[0].Player.Name != "Helper McPlayer" {
+		t.Errorf("penalties = %+v", gs.Penalties)
+	}
+}
+
+func TestShortHandedGoalIsBlank(t *testing.T) {
+	sheet := sampleSheet()
+	sheet.Visitor.Penalties = []scoresheet.Penalty{{
+		Period: "3", Number: "5", Minutes: 2, HasMinutes: true,
+		Code: "TR-MIN", Start: "10:00", On: "08:00",
+	}}
+	gs, err := Build(sampleGame(), sheet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gs.Goals[0].Situation != "" {
+		t.Errorf("shorthanded situation = %q, want blank", gs.Goals[0].Situation)
+	}
+}
+
+func TestShootoutEnding(t *testing.T) {
+	sheet := sampleSheet()
+	sheet.Visitor.Goals = 2
+	sheet.Visitor.Scores = append(sheet.Visitor.Scores, scoresheet.Goal{Period: "SO", Time: "00:00", Scorer: "3"})
+	game := sampleGame()
+	game.EventData.VisitorGoals = intp(2)
+	gs, err := Build(game, sheet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gs.Ended != "SO" {
+		t.Errorf("ended = %q", gs.Ended)
+	}
+	if gs.Goals[1].Situation != "SH" {
+		t.Errorf("shootout situation = %q", gs.Goals[1].Situation)
+	}
 }
 
 func TestBuildProratesGoalieWithoutShots(t *testing.T) {

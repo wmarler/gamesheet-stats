@@ -120,6 +120,30 @@ func (c *Client) Games(teamID string) ([]Game, error) {
 	return out.Data, nil
 }
 
+// ScheduleGame is the metadata returned by GET /api/schedule-game/{id}.
+type ScheduleGame struct {
+	GameType   string `json:"game_type"`
+	GameNumber string `json:"game_number"`
+	SeasonID   int    `json:"season_id"`
+}
+
+// ScheduleGame fetches scheduling metadata for one game, including the
+// league's game type (regular_season, exhibition, tournament, playoff, ...).
+func (c *Client) ScheduleGame(gameID string) (*ScheduleGame, error) {
+	var out struct {
+		Success bool         `json:"success"`
+		Data    ScheduleGame `json:"data"`
+		Error   string       `json:"error"`
+	}
+	if err := c.getJSON("/api/schedule-game/"+url.PathEscape(gameID), nil, &out); err != nil {
+		return nil, err
+	}
+	if !out.Success && out.Data.GameType == "" {
+		return nil, fmt.Errorf("schedule-game %s: %s", gameID, out.Error)
+	}
+	return &out.Data, nil
+}
+
 // ScoresheetPDF downloads the official scoresheet PDF for a game.
 func (c *Client) ScoresheetPDF(gameID string) ([]byte, error) {
 	resp, err := c.do(http.MethodGet, "/api/scoresheets/games/"+url.PathEscape(gameID)+"/download", nil)

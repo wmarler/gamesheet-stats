@@ -2,7 +2,6 @@ package report
 
 import (
 	"encoding/csv"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,50 +10,21 @@ import (
 	"github.com/wmarler/gamesheet-stats/internal/stats"
 )
 
-// WriteCSVs writes four CSV files into dir:
+// WriteCSVs writes the three log files into dir:
 //
-//	games.csv    one row per game (team-level: score, shots for/against by period)
-//	goalies.csv  one row per goalie per game (shots faced by period, minutes)
-//	players.csv  one row per dressed player per game (goals, assists)
-//	goals.csv    one row per scoring play (scorer, assists)
+//	game_log.csv     one row per game
+//	goal_log.csv     one row per goal we scored
+//	penalty_log.csv  one row per penalty we took
 //
+// A cell is left empty when that fact cannot be read from the scoresheet.
 // It returns the paths written.
 func WriteCSVs(dir string, games []*stats.GameStats) ([]string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	maxPer := 0
-	for _, g := range games {
-		if n := len(g.PeriodLabels); n > maxPer {
-			maxPer = n
-		}
-	}
-	if maxPer == 0 {
-		maxPer = 3
-	}
-	perCols := func(prefix string) []string {
-		out := make([]string, maxPer)
-		for i := range out {
-			out[i] = fmt.Sprintf("%s_p%d", prefix, i+1)
-		}
-		return out
-	}
-	perVals := func(vals []int) []string {
-		out := make([]string, maxPer)
-		for i := range out {
-			if i < len(vals) {
-				out[i] = strconv.Itoa(vals[i])
-			}
-		}
-		return out
-	}
-	gameCols := []string{"game_id", "date", "season_id", "league", "game_no", "team", "opponent", "home_away", "result", "goals_for", "goals_against"}
-	gameVals := func(g *stats.GameStats) []string {
-		ha := "home"
-		if !g.IsHome {
-			ha = "away"
-		}
-		return []string{g.GameID, g.Date, strconv.Itoa(g.SeasonID), g.League, g.GameNo, g.TeamName, g.Opponent, ha, g.Result, strconv.Itoa(g.GoalsFor), strconv.Itoa(g.GoalsAgt)}
+	// These were produced by an earlier version of the program.
+	for _, old := range []string{"games.csv", "goalies.csv", "players.csv", "goals.csv"} {
+		_ = os.Remove(filepath.Join(dir, old))
 	}
 
 	var paths []string
@@ -79,91 +49,113 @@ func WriteCSVs(dir string, games []*stats.GameStats) ([]string, error) {
 		return cw.Error()
 	}
 
-	// games.csv
-	{
-		header := append(append([]string{}, gameCols...), "shots_for")
-		header = append(header, perCols("shots_for")...)
-		header = append(header, "shots_against")
-		header = append(header, perCols("shots_against")...)
-		header = append(header, "location", "warnings")
-		var rows [][]string
-		for _, g := range games {
-			r := append(gameVals(g), strconv.Itoa(g.ShotsForTot))
-			r = append(r, perVals(g.ShotsFor)...)
-			r = append(r, strconv.Itoa(g.ShotsAgtTot))
-			r = append(r, perVals(g.ShotsAgt)...)
-			r = append(r, g.Location, strings.Join(g.Warnings, "; "))
-			rows = append(rows, r)
+	gameHeader := []string{
+		"Game #", "Date", "Opponent", "Home/Away", "Game Type",
+		"Goals-For", "Shots-For",
+		"Goalie 1", "Goalie 1 Minutes", "Goalie 1 Shots Faced", "Goalie 1 Goals Against",
+		"Goalie 2", "Goalie 2 Minutes", "Goalie 2 Shots Faced", "Goalie 2 Goals Against",
+		"Empty-net Goals Against", "How the game ended",
+	}
+	var gameRows, goalRows, penRows [][]string
+	for i, g := range games {
+		// Game # is the row's place in this log, not the GameSheet id.
+		id := strconv.Itoa(i + 1)
+		ha := "Home"
+		if !g.IsHome {
+			ha = "Away"
 		}
-		if err := write("games.csv", header, rows); err != nil {
-			return nil, err
+		row := []string{
+			id, g.Date, g.Opponent, ha, g.GameType,
+			strconv.Itoa(g.GoalsFor), shotsCell(g.ShotsForTot, g.ShotsFor != nil),
+		}
+		played := playedGoalies(g)
+		for slot := 0; slot < 2; slot++ {
+			if slot >= len(played) {
+				row = append(row, "", "", "", "")
+				continue
+			}
+			gl := played[slot]
+			ga := ""
+			if gl.GoalsAgainstKnown {
+				ga = strconv.Itoa(gl.GoalsAgainst)
+			}
+			row = append(row, goalieName(gl), formatMinutes(gl.Minutes), strconv.Itoa(gl.Total), ga)
+		}
+		en := ""
+		if g.EmptyNetKnown {
+			en = strconv.Itoa(g.EmptyNetAgainst)
+		}
+		row = append(row, en, g.Ended)
+		gameRows = append(gameRows, row)
+
+		for _, ev := range g.Goals {
+			a1, a2 := "", ""
+			if len(ev.Assists) > 0 {
+				a1 = personName(ev.Assists[0])
+			}
+			if len(ev.Assists) > 1 {
+				a2 = personName(ev.Assists[1])
+			}
+			goalRows = append(goalRows, []string{id, ev.Period, personName(ev.Scorer), a1, a2, ev.Situation})
+		}
+		for _, p := range g.Penalties {
+			penRows = append(penRows, []string{id, p.Period, personName(p.Player), p.Type, p.Minutes})
 		}
 	}
 
-	// goalies.csv
-	{
-		header := append(append([]string{}, gameCols...), "goalie_no", "goalie", "shots_faced")
-		header = append(header, perCols("shots_faced")...)
-		header = append(header, "minutes", "estimated", "dressed_only")
-		var rows [][]string
-		for _, g := range games {
-			for _, gl := range g.Goalies {
-				r := append(gameVals(g), gl.Number, gl.Name)
-				if gl.Dressed {
-					r = append(r, "")
-					r = append(r, perVals(nil)...)
-					r = append(r, "", "false", "true")
-				} else {
-					r = append(r, strconv.Itoa(gl.Total))
-					r = append(r, perVals(gl.Shots)...)
-					r = append(r, strconv.FormatFloat(gl.Minutes, 'f', 2, 64), strconv.FormatBool(gl.Estimated), "false")
-				}
-				rows = append(rows, r)
-			}
-		}
-		if err := write("goalies.csv", header, rows); err != nil {
-			return nil, err
-		}
+	if err := write("game_log.csv", gameHeader, gameRows); err != nil {
+		return nil, err
 	}
-
-	// players.csv
-	{
-		header := append(append([]string{}, gameCols...), "player_no", "player", "position", "goals", "assists", "points")
-		var rows [][]string
-		for _, g := range games {
-			for _, p := range g.Players {
-				rows = append(rows, append(gameVals(g), p.Number, p.Name, p.Position, strconv.Itoa(p.Goals), strconv.Itoa(p.Assists), strconv.Itoa(p.Points())))
-			}
-		}
-		if err := write("players.csv", header, rows); err != nil {
-			return nil, err
-		}
+	if err := write("goal_log.csv", []string{"Game #", "Period", "Scorer", "Assist 1", "Assist 2", "Situation"}, goalRows); err != nil {
+		return nil, err
 	}
-
-	// goals.csv
-	{
-		header := append(append([]string{}, gameCols...), "scoring_team", "period", "time", "scorer_no", "scorer", "assist1_no", "assist1", "assist2_no", "assist2")
-		var rows [][]string
-		add := func(g *stats.GameStats, who string, evs []stats.GoalEvent) {
-			for _, ev := range evs {
-				r := append(gameVals(g), who, ev.Period, ev.Time, ev.Scorer.Number, ev.Scorer.Name)
-				for i := 0; i < 2; i++ {
-					if i < len(ev.Assists) {
-						r = append(r, ev.Assists[i].Number, ev.Assists[i].Name)
-					} else {
-						r = append(r, "", "")
-					}
-				}
-				rows = append(rows, r)
-			}
-		}
-		for _, g := range games {
-			add(g, "us", g.Goals)
-			add(g, "opponent", g.Against)
-		}
-		if err := write("goals.csv", header, rows); err != nil {
-			return nil, err
-		}
+	if err := write("penalty_log.csv", []string{"Game #", "Period", "Player", "Penalty Type", "Minutes"}, penRows); err != nil {
+		return nil, err
 	}
 	return paths, nil
+}
+
+func playedGoalies(g *stats.GameStats) []stats.GoalieGame {
+	var out []stats.GoalieGame
+	for _, gl := range g.Goalies {
+		if gl.Dressed {
+			continue
+		}
+		out = append(out, gl)
+	}
+	return out
+}
+
+func goalieName(g stats.GoalieGame) string {
+	if g.Name != "" {
+		return g.Name
+	}
+	if g.Number != "" {
+		return "#" + g.Number
+	}
+	return ""
+}
+
+func personName(p stats.Person) string {
+	if p.Name != "" {
+		return p.Name
+	}
+	if p.Number != "" {
+		return "#" + p.Number
+	}
+	return ""
+}
+
+func shotsCell(n int, known bool) string {
+	if !known {
+		return ""
+	}
+	return strconv.Itoa(n)
+}
+
+func formatMinutes(m float64) string {
+	s := strconv.FormatFloat(m, 'f', 2, 64)
+	s = strings.TrimRight(s, "0")
+	s = strings.TrimRight(s, ".")
+	return s
 }

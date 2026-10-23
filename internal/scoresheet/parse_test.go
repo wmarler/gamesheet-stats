@@ -27,7 +27,7 @@ func sideRuns() []run {
 		{41, 427.5, "10"}, {60, 427.5, "C"}, {105, 427.5, "CAPTAIN SKATER"},
 		{41, 415.5, "11"}, {112, 415.5, "WINGER ONE"}, {189, 415.5, "(INJ)"},
 		{43, 403.5, "7"}, {110, 403.5, "DEFENDER TWO"},
-		// A penalty row (should be ignored).
+		// A penalty row.
 		{218, 450, "2"}, {234, 450, "7"}, {256, 450, "2"}, {283, 450, "TR-MIN"}, {328, 450, "07:09"}, {357, 450, "07:09"}, {386, 450, "05:21"},
 		// Scoring plays.
 		{420, 462, "1"}, {436, 462, "08:57"}, {464, 462, "10"},
@@ -97,6 +97,13 @@ func TestParseSide(t *testing.T) {
 	}
 	if !reflect.DeepEqual(ts.Goalies, wantGoalies) {
 		t.Errorf("Goalies = %+v\nwant %+v", ts.Goalies, wantGoalies)
+	}
+	wantPens := []Penalty{{
+		Period: "2", Number: "7", Minutes: 2, HasMinutes: true,
+		Code: "TR-MIN", Start: "07:09", On: "05:21",
+	}}
+	if !reflect.DeepEqual(ts.Penalties, wantPens) {
+		t.Errorf("Penalties = %+v\nwant %+v", ts.Penalties, wantPens)
 	}
 }
 

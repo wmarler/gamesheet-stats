@@ -22,6 +22,15 @@ type GameStats struct {
 	Location string
 	GameNo   string
 
+	// GameType is League, Tournament, Exhibition, or Playoff. Empty if unknown.
+	GameType string
+	// Ended is "" for regulation, "OT" for overtime, or "SO" for a shootout.
+	Ended string
+	// EmptyNetAgainst is empty-net goals scored against us. Known is false
+	// when the scoresheet doesn't show whether a goal was into an empty net.
+	EmptyNetAgainst int
+	EmptyNetKnown   bool
+
 	TeamName string // our team's name as printed on this scoresheet
 	Opponent string
 	IsHome   bool
@@ -35,11 +44,12 @@ type GameStats struct {
 	ShotsAgt     []int // shots we faced, per period
 	ShotsAgtTot  int
 
-	Goalies  []GoalieGame
-	Goals    []GoalEvent  // our scoring plays, with names resolved
-	Players  []PlayerGame // every dressed skater/goalie with G/A for this game
-	Against  []GoalEvent  // opponent scoring plays (numbers/names of opponent)
-	Warnings []string
+	Goalies   []GoalieGame
+	Goals     []GoalEvent // our scoring plays, with names resolved
+	Penalties []PenaltyEvent
+	Players   []PlayerGame // every dressed skater/goalie with G/A for this game
+	Against   []GoalEvent  // opponent scoring plays (numbers/names of opponent)
+	Warnings  []string
 }
 
 // GoalieGame is one of our goalies' lines for one game.
@@ -51,6 +61,12 @@ type GoalieGame struct {
 	Minutes   float64
 	Estimated bool // true when per-period shots were prorated from minutes played
 	Dressed   bool // on the roster as G but did not appear in the shots table
+
+	// GoalsAgainst is set only when every goal against can be given to a
+	// goalie (or ruled an empty-net goal). Otherwise GoalsAgainstKnown is false
+	// and the CSV cell is left blank.
+	GoalsAgainst      int
+	GoalsAgainstKnown bool
 }
 
 // GoalEvent is a scoring play with names resolved.
@@ -59,6 +75,18 @@ type GoalEvent struct {
 	Time    string
 	Scorer  Person
 	Assists []Person
+	// Situation is EV, PP, SH (shootout), EN, or PS. Empty when it cannot be
+	// determined, including a short-handed goal (that code is not in the
+	// requested set; SH means shootout).
+	Situation string
+}
+
+// PenaltyEvent is one of our penalties.
+type PenaltyEvent struct {
+	Period  string
+	Player  Person
+	Type    string // Tripping, Hooking, ..., Other. Empty if the code is missing.
+	Minutes string // "2", "4", "5", or "10". Empty if it cannot be classified.
 }
 
 // Person is a jersey number plus name.
@@ -100,6 +128,7 @@ func Build(g gamesheet.Game, sheet *scoresheet.Scoresheet) (*GameStats, error) {
 		Division: sheet.Division,
 		Location: firstNonEmpty(g.EventLocation, sheet.Location),
 		GameNo:   firstNonEmpty(sheet.GameNumber, g.EventData.GameNumber),
+		GameType: sheet.GameType,
 		TeamName: firstNonEmpty(us.Name, g.MyTeamName()),
 		Opponent: firstNonEmpty(them.Name, g.Opponent()),
 		IsHome:   g.EventData.IsHome,
@@ -206,6 +235,7 @@ func Build(g gamesheet.Game, sheet *scoresheet.Scoresheet) (*GameStats, error) {
 			p.Assists++
 		}
 	}
+	finishGame(gs, us, them)
 	sort.SliceStable(gs.Players, func(i, j int) bool {
 		pi, pj := gs.Players[i], gs.Players[j]
 		if pi.Points() != pj.Points() {

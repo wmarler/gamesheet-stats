@@ -28,10 +28,12 @@ directly, the same way the web app does:
 4. For each completed ("final") game, download the official scoresheet PDF
    (`GET /api/scoresheets/games/{id}/download`) and parse it.
 
-The scoresheet PDF contains everything we need: rosters, scoring plays with
-scorer/assists, and a SHOTS table with shots per period per goalie plus
-minutes played. The PDF is parsed with a pure-Go library using text
-coordinates (no poppler/pdftotext needed). PDFs are cached in `cache/pdfs/`.
+The scoresheet PDF contains everything we need: rosters, scoring plays,
+penalties, the checked game-type box, and a SHOTS table with shots per period
+per goalie plus minutes played. The PDF is parsed with a pure-Go library
+using text coordinates (no poppler/pdftotext needed). PDFs are cached in
+`cache/pdfs/`. When the game-type checkbox cannot be read, the program falls
+back to the schedule API's `game_type`.
 
 ### Goalie shot attribution
 
@@ -81,19 +83,37 @@ Progress goes to stderr; the report goes to stdout, so
 
 ### CSV files
 
-| File            | One row per…                 | Notable columns |
-|-----------------|------------------------------|-----------------|
-| `games.csv`     | game                         | `shots_for`, `shots_for_p1..3`, `shots_against`, `shots_against_p1..3`, `warnings` |
-| `goalies.csv`   | goalie per game              | `shots_faced`, `shots_faced_p1..3`, `minutes`, `estimated`, `dressed_only` |
-| `players.csv`   | dressed player per game      | `goals`, `assists`, `points`, `position` |
-| `goals.csv`     | scoring play (both teams)    | `scoring_team` (`us`/`opponent`), `period`, `time`, `scorer`, `assist1`, `assist2` |
+Three files are written. `Game #` is the game's place in `game_log.csv`,
+starting at 1 for the earliest game. `goal_log.csv` and `penalty_log.csv` use
+that same number. A cell is left blank when the scoresheet does not say.
 
-Every CSV starts with the same game columns (`game_id`, `date`, `season_id`,
-`league`, `game_no`, `team`, `opponent`, `home_away`, `result`, `goals_for`,
-`goals_against`) so the files can be joined on `game_id`.
+`game_log.csv` — one row per game:
+
+| Column | Values |
+|---|---|
+| Game #, Date, Opponent | |
+| Home/Away | `Home` or `Away` |
+| Game Type | `League`, `Tournament`, `Exhibition`, or `Playoff` |
+| Goals-For, Shots-For | |
+| Goalie 1 / Goalie 2 | name, minutes, shots faced, goals against. Only goalies who played. Goals against is blank when two goalies split the period the goal was scored in |
+| Empty-net Goals Against | blank when it cannot be told apart from a goal on a goalie |
+| How the game ended | blank for regulation, `OT`, or `SO` |
+
+`goal_log.csv` — one row per goal we scored: Game #, Period, Scorer, Assist 1,
+Assist 2, Situation. Situation is `EV` even strength, `PP` power play, `SH`
+shootout, `EN` empty net, or `PS` penalty shot. A short-handed goal is left
+blank, because `SH` means shootout in this file. Power play is decided from
+penalty start/return times on the scoresheet (the clock counts down).
+
+`penalty_log.csv` — one row per penalty we took: Game #, Period, Player,
+Penalty Type, Minutes. Penalty Type is one of Tripping, Hooking, Holding,
+Slashing, Interference, Roughing, Cross-checking, High-sticking, Boarding,
+Body Checking, Delay of Game, Too Many Players, Unsportsmanlike, Misconduct,
+or Other. Minutes is `2`, `4`, `5`, or `10`. Running-time sheets print a minor
+as 1 or 1.5 minutes; those are recorded as `2` from the penalty code.
 
 Note: a player's jersey number can differ between leagues; the season summary
-matches players by name and lists all numbers seen.
+on stdout matches players by name.
 
 ## Development
 
