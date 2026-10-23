@@ -108,7 +108,7 @@ penalty start/return times on the scoresheet (the clock counts down).
 `penalty_log.csv` — one row per penalty we took: Game #, Period, Player,
 Penalty Type, Minutes. Penalty Type is one of Tripping, Hooking, Holding,
 Slashing, Interference, Roughing, Cross-checking, High-sticking, Boarding,
-Body Checking, Delay of Game, Too Many Players, Unsportsmanlike, Misconduct,
+Body checking, Delay of Game, Too many players, Unsportsmanlike, Misconduct,
 or Other. Minutes is `2`, `4`, `5`, or `10`. Running-time sheets print a minor
 as 1 or 1.5 minutes; those are recorded as `2` from the penalty code.
 

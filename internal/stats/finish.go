@@ -315,11 +315,11 @@ func penaltyType(code string) string {
 	case "BDG":
 		return "Boarding"
 	case "BC":
-		return "Body Checking"
+		return "Body checking"
 	case "DG", "DOG":
 		return "Delay of Game"
 	case "TMP", "TMM":
-		return "Too Many Players"
+		return "Too many players"
 	case "USP", "USC", "UNS", "DAB":
 		return "Unsportsmanlike"
 	case "MSC", "GM", "GRM", "GE":
